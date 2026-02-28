@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -80,7 +81,8 @@ header{display:flex;align-items:center;justify-content:space-between;padding:18p
 .unassigned-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;margin-bottom:24px;}
 .uthumb{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:2px solid var(--border);background:var(--surface2);transition:all .2s;}
 .uthumb:hover{border-color:#555;}
-.uthumb.sel{border-color:var(--info);box-shadow:0 0 0 2px rgba(59,130,246,.4);}
+.uthumb.sel{border-color:var(--info);box-shadow:0 0 0 0 4px rgba(59,130,246,.5);outline:3px solid var(--info);}
+.uthumb.sel::after{content:'✓';position:absolute;top:4px;left:4px;background:var(--info);color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;line-height:20px;text-align:center;}
 .uthumb img{width:100%;height:100%;object-fit:cover;display:block;}
 .uthumb .uremove{position:absolute;top:3px;right:3px;background:rgba(0,0,0,.75);border:none;color:#fff;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;}
 .uthumb:hover .uremove{opacity:1;}
@@ -353,6 +355,7 @@ var groups = [];       // {id, name, photoIds[], listing, analyzed, published, e
 var groupMode = true;
 var selectedPhotoIds = [];
 var analyzing = false;
+var groupCounter = 0;
 var ebayToken='', ebayFulfill='', ebayReturn='', ebayPayment='', ebayMarket='EBAY_US';
 
 // ── eBay category lookup table (name keywords → {id, name}) ──
@@ -464,17 +467,18 @@ function addNewGroup() {
 
 function createGroupFromSelected() {
   if (!selectedPhotoIds.length) { showToast('Select at least one photo first','error'); return; }
-  var id='grp_'+Date.now()+'_'+Math.floor(Math.random()*99999);
-  var name='Item '+(groups.length+1);
+  groupCounter++;
+  var id='grp_'+groupCounter+'_'+Date.now();
+  var name='Item '+groupCounter;
   var grp={id:id,name:name,photoIds:selectedPhotoIds.slice(),listing:null,analyzed:false,published:false,ebayItemId:''};
   groups.push(grp);
-  // assign photos to group
   grp.photoIds.forEach(function(pid){
-    var ph=getPhoto(pid); if(ph) ph.groupId=id;
+    var ph=getPhoto(pid);
+    if(ph){ ph.groupId=id; }
   });
   selectedPhotoIds=[];
   renderAll();
-  showToast('Group "'+name+'" created with '+grp.photoIds.length+' photo(s)','success');
+  showToast('Group "'+name+'" created with '+grp.photoIds.length+' photo(s) — now hit Analyze All!','success');
 }
 
 function addPhotoToGroup(photoId, groupId) {
@@ -592,7 +596,8 @@ function renderUnassigned() {
       '<div class="ulabel">'+(ph.groupId?'grouped':'unassigned')+'</div>';
     if(isUnassigned){
       div.style.cursor='pointer';
-      div.onclick=(function(pid){return function(){selectPhoto(pid);};})(ph.id);
+      div.title='Click to select, then click New Group';
+      div.onclick=(function(pid){return function(e){e.stopPropagation();selectPhoto(pid);};})(ph.id);
     }
     grid.appendChild(div);
   });
@@ -603,14 +608,20 @@ function renderUnassigned() {
 // ══════════════════════════════════════════════
 function analyzeAll() {
   if(analyzing) return;
-  // Auto-group unassigned photos as individual groups
+
+  // Check if we have any groups at all
+  if(groups.length === 0){
+    showToast('Please select your photos and click New Group first!','error');
+    return;
+  }
+
+  // Check for any unassigned photos
   var unassigned=photos.filter(function(p){return !p.groupId;});
-  unassigned.forEach(function(ph){
-    var id='grp_'+Date.now()+'_'+Math.floor(Math.random()*999999);
-    var grp={id:id,name:'Item '+(groups.length+1),photoIds:[ph.id],listing:null,analyzed:false,published:false,ebayItemId:''};
-    groups.push(grp);
-    ph.groupId=id;
-  });
+  if(unassigned.length > 0){
+    showToast(unassigned.length+' photo(s) not in any group — select them and click New Group first!','error');
+    return;
+  }
+
   renderAll();
 
   var queue=groups.filter(function(g){return !g.analyzed;});
@@ -969,7 +980,13 @@ function publishGroup(grp,callback){
     if(res.status===204||res.status===200||res.status===201){return createOffer(grp,sku,l,callback);}
     return res.json().then(function(d){callback(false,(d.errors&&d.errors[0])?d.errors[0].message:'HTTP '+res.status,null);});
   })
-  .catch(function(err){callback(false,err.message,null);});
+  .catch(function(err){
+    var msg = err.message || 'Unknown error';
+    if(msg.indexOf('fetch')!==-1||msg.indexOf('Failed')!==-1||msg.indexOf('CORS')!==-1){
+      msg = 'CORS error — eBay API must be called from a server, not a local file. See instructions below.';
+    }
+    callback(false, msg, null);
+  });
 }
 
 function createOffer(grp,sku,l,callback){
@@ -992,7 +1009,7 @@ function createOffer(grp,sku,l,callback){
     if(data.offerId){publishOffer(data.offerId,callback);}
     else callback(false,(data.errors&&data.errors[0])?data.errors[0].message:'Offer failed',null);
   })
-  .catch(function(err){callback(false,err.message,null);});
+  .catch(function(err){callback(false,'Network: '+err.message,null);});
 }
 
 function publishOffer(offerId,callback){
