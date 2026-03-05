@@ -194,12 +194,12 @@ select option{background:var(--bg);}
 </head>
 <body>
 
-<div class="topbar"><span class="dot"></span> SnapList — AI eBay Lister &nbsp;·&nbsp; Select photos → Group by item → AI drafts listings → Publish to eBay</div>
+<div class="topbar"><span class="dot"></span> SnapList — AI eBay Lister &nbsp;·&nbsp; Drop photos → AI auto-groups by item → Drafts listings → Publish to eBay</div>
 
 <header>
   <div class="logo">SnapList<span>AI eBay Lister</span></div>
   <div class="hactions">
-    <button class="btn btn-ghost btn-sm" onclick="toggleGroupMode()" id="groupModeBtn">📦 Group Mode: ON</button>
+    
     <button class="btn btn-ghost btn-sm" onclick="clearAll()">🗑 Clear All</button>
     <button class="btn btn-secondary btn-sm" onclick="openCredModal()" title="eBay Credentials">⚙️ eBay Creds <span id="headerCredDot" style="width:8px;height:8px;border-radius:50%;background:var(--error);display:inline-block;margin-left:2px;vertical-align:middle"></span></button>
     <button class="btn btn-primary" id="analyzeAllBtn" onclick="analyzeAll()" disabled>✨ Analyze All</button>
@@ -212,19 +212,11 @@ select option{background:var(--bg);}
   <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
     <div class="drop-icon">📸</div>
     <div class="drop-title">Drop Product Photos Here</div>
-    <div class="drop-sub">Click to browse or drag &amp; drop — <strong>JPG, PNG, WEBP</strong><br>Add multiple angles of the same item, or photos of different items</div>
+    <div class="drop-sub">Click to browse or drag &amp; drop — <strong>JPG, PNG, WEBP</strong><br>AI automatically groups photos of the same item together — just drop everything in at once!</div>
   </div>
   <input type="file" id="fileInput" multiple accept="image/*" style="display:none">
 
-  <!-- GROUP MODE BANNER -->
-  <div class="group-banner active" id="groupBanner">
-    <div style="font-size:22px">📦</div>
-    <div class="ginfo">
-      <strong>Group Mode ON</strong> — select 5+ photos of the same item, click <strong>"New Group from Selected"</strong>. Repeat for each item. Then hit Analyze All.
-    </div>
-    <button class="btn btn-info btn-sm" id="newGroupBtn" onclick="createGroupFromSelected()">+ New Group from Selected (<span id="selCount">0</span>)</button>
-    <button class="btn btn-ghost btn-sm" onclick="toggleGroupMode()">Done</button>
-  </div>
+
 
   <!-- GROUPS -->
   <div id="groupsArea" style="display:none">
@@ -239,11 +231,7 @@ select option{background:var(--bg);}
   <div id="unassignedSection" style="display:none">
     <div class="sec-header">
       <div class="sec-title">PHOTOS <span id="photoCount" class="cbadge">0</span></div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost btn-sm" onclick="selectAll()">☑ Select All</button>
-        <button class="btn btn-ghost btn-sm" onclick="clearSelection()">✕ Deselect</button>
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('fileInput').click()">+ Add More</button>
-      </div>
+<button class="btn btn-ghost btn-sm" onclick="document.getElementById('fileInput').click()">+ Add More</button>
     </div>
     <div class="unassigned-grid" id="unassignedGrid"></div>
   </div>
@@ -252,7 +240,7 @@ select option{background:var(--bg);}
   <div class="analyze-bar" id="analyzeBar" style="display:none">
     <div class="ainfo">
       <strong id="analyzeStatus">Ready to analyze</strong>
-      <p id="analyzeSubtext">Click "Analyze All" to generate eBay listings with AI</p>
+      <p id="analyzeSubtext">AI will auto-group your photos by item and generate listings automatically</p>
     </div>
     <div class="prog-wrap" id="progWrap" style="display:none">
       <div class="prog-bar"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
@@ -455,8 +443,6 @@ function handleFiles(files) {
 function toggleGroupMode() {
   groupMode = !groupMode;
   selectedPhotoIds = [];
-  document.getElementById('groupModeBtn').textContent = '📦 Group Mode: ' + (groupMode ? 'ON' : 'OFF');
-  document.getElementById('groupBanner').className = 'group-banner' + (groupMode ? ' active' : '');
   renderAll();
 }
 
@@ -610,62 +596,167 @@ function renderUnassigned() {
 // ══════════════════════════════════════════════
 function analyzeAll() {
   if(analyzing) return;
-
   if(!anthropicKey){openCredModal();showToast('Add your Anthropic API key first!','error');return;}
-
-  // Check if we have any groups at all
-  if(groups.length === 0){
-    showToast('Please select your photos and click New Group first!','error');
-    return;
-  }
-
-  // Check for any unassigned photos
-  var unassigned=photos.filter(function(p){return !p.groupId;});
-  if(unassigned.length > 0){
-    showToast(unassigned.length+' photo(s) not in any group — select them and click New Group first!','error');
-    return;
-  }
-
-  renderAll();
-
-  var queue=groups.filter(function(g){return !g.analyzed;});
-  if(!queue.length){showToast('All items already analyzed','info');return;}
+  if(!photos.length){showToast('Add some photos first!','error');return;}
 
   analyzing=true;
   document.getElementById('analyzeAllBtn').disabled=true;
-  document.getElementById('analyzeAllBtn').innerHTML='<div class="spinner"></div> Analyzing...';
+  document.getElementById('analyzeAllBtn').innerHTML='<div class="spinner"></div> Auto-grouping...';
   document.getElementById('progWrap').style.display='';
+  document.getElementById('analyzeStatus').textContent='Step 1 of 2: Identifying items in photos...';
+  document.getElementById('analyzeSubtext').textContent='AI is analyzing all '+photos.length+' photos...';
 
+  // Step 1: Analyze every photo to get a brief description
+  var descriptions = {}; // photoId -> {title, itemType, color, brand}
+  var pending = photos.length;
+  var done = 0;
+
+  photos.forEach(function(photo) {
+    compressImage(photo.dataUrl, function(compressed) {
+      var base64 = compressed.split(',')[1];
+      var payload = {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 200,
+        messages: [{
+          role: 'user',
+          content: [
+            {type:'image', source:{type:'base64', media_type:'image/jpeg', data:base64}},
+            {type:'text', text:'Look at this product photo. Reply ONLY with a JSON object, no markdown:\n{"itemType":"short item type e.g. blue denim jacket","brand":"brand or unknown","color":"main color","uniqueFeatures":"1-2 distinctive features"}\nBe very specific so similar items can be grouped together.'}
+          ]
+        }]
+      };
+      fetch('https://api.anthropic.com/v1/messages', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','x-api-key':anthropicKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify(payload)
+      })
+      .then(function(r){return r.json();})
+      .then(function(data){
+        if(!data.error){
+          var text = data.content[0].text.replace(/```json|```/g,'').trim();
+          try { descriptions[photo.id] = JSON.parse(text); } catch(e) { descriptions[photo.id] = {itemType:'unknown',brand:'unknown',color:'unknown',uniqueFeatures:''}; }
+        }
+        done++;
+        document.getElementById('progFill').style.width=(done/photos.length*50)+'%';
+        document.getElementById('progLbl').textContent=done+' / '+photos.length;
+        if(done >= photos.length) autoGroup(descriptions);
+      })
+      .catch(function(){
+        descriptions[photo.id] = {itemType:'unknown',brand:'unknown',color:'unknown',uniqueFeatures:''};
+        done++;
+        if(done >= photos.length) autoGroup(descriptions);
+      });
+    });
+  });
+}
+
+function autoGroup(descriptions) {
+  document.getElementById('analyzeStatus').textContent='Step 2 of 2: Grouping matching photos...';
+  document.getElementById('analyzeSubtext').textContent='AI is grouping photos of the same item together...';
+
+  // Build a description string for each photo
+  var photoDescs = photos.map(function(ph) {
+    var d = descriptions[ph.id] || {};
+    return ph.id + ': ' + JSON.stringify(d);
+  }).join('\n');
+
+  var payload = {
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1000,
+    messages: [{
+      role: 'user',
+      content: [{
+        type: 'text',
+        text: 'I have these product photos with their descriptions:\n\n' + photoDescs + '\n\nGroup the photo IDs that appear to be the SAME physical item (same item type, color, brand, features). Different angles of the same item should be in the same group. Different items should be in different groups.\n\nReply ONLY with a JSON array of groups, no markdown:\n[["photoId1","photoId2"],["photoId3","photoId4","photoId5"]]\n\nEach inner array is one item/listing. Every photo ID must appear exactly once.'
+      }]
+    }]
+  };
+
+  fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':anthropicKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify(payload)
+  })
+  .then(function(r){return r.json();})
+  .then(function(data){
+    if(data.error){showToast('Grouping failed: '+data.error.message,'error');resetAnalyzeBtn();return;}
+    var text = data.content[0].text.replace(/```json|```/g,'').trim();
+    var groupArrays;
+    try { groupArrays = JSON.parse(text); } 
+    catch(e) {
+      // fallback: each photo is its own group
+      groupArrays = photos.map(function(ph){return [ph.id];});
+    }
+
+    // Clear existing groups
+    groups = [];
+    document.querySelectorAll('.listing-card').forEach(function(el){el.remove();});
+    document.getElementById('emptyState').style.display='none';
+
+    // Create groups from AI suggestions
+    groupArrays.forEach(function(photoIds, idx) {
+      var validIds = photoIds.filter(function(pid){return photos.find(function(p){return p.id===pid;});});
+      if(!validIds.length) return;
+      groupCounter++;
+      var id = 'grp_'+groupCounter+'_'+Date.now();
+      var grp = {id:id, name:'Item '+(idx+1), photoIds:validIds, listing:null, analyzed:false, published:false, ebayItemId:''};
+      groups.push(grp);
+      validIds.forEach(function(pid){var ph=getPhoto(pid);if(ph)ph.groupId=id;});
+    });
+
+    // Any unassigned photos get their own group
+    photos.filter(function(p){return !p.groupId;}).forEach(function(ph){
+      groupCounter++;
+      var id='grp_'+groupCounter+'_'+Date.now();
+      var grp={id:id,name:'Item '+groups.length+1,photoIds:[ph.id],listing:null,analyzed:false,published:false,ebayItemId:''};
+      groups.push(grp);
+      ph.groupId=id;
+    });
+
+    showToast('✓ Grouped into '+groups.length+' items! Now generating listings...','success');
+    renderAll();
+    generateAllListings();
+  })
+  .catch(function(err){
+    showToast('Grouping error — '+err.message,'error');
+    resetAnalyzeBtn();
+  });
+}
+
+function generateAllListings() {
+  document.getElementById('analyzeStatus').textContent='Generating listings for '+groups.length+' items...';
+  var queue = groups.filter(function(g){return !g.analyzed;});
   var done=0, total=queue.length;
 
   function next(){
     if(done>=total){
-      analyzing=false;
-      document.getElementById('analyzeAllBtn').disabled=false;
-      document.getElementById('analyzeAllBtn').innerHTML='✨ Re-Analyze';
-      document.getElementById('analyzeStatus').textContent='✓ '+total+' item(s) analyzed';
-      document.getElementById('analyzeSubtext').textContent='Review listings below, then publish to eBay';
-      showToast(total+' listing(s) generated!','success');
+      resetAnalyzeBtn();
+      document.getElementById('analyzeStatus').textContent='✓ '+total+' listing(s) ready!';
+      document.getElementById('analyzeSubtext').textContent='Review below and publish to eBay';
+      document.getElementById('progFill').style.width='100%';
+      showToast(total+' listings generated!','success');
       updateExport();
       return;
     }
     var grp=queue[done];
-    document.getElementById('analyzeStatus').textContent='Analyzing item '+(done+1)+' of '+total+'...';
-    document.getElementById('analyzeSubtext').textContent=grp.name+' ('+grp.photoIds.length+' photo'+(grp.photoIds.length>1?'s':'')+')';
-
+    document.getElementById('analyzeSubtext').textContent='Writing listing '+(done+1)+' of '+total+': '+grp.name;
     var groupPhotos=grp.photoIds.map(function(pid){return getPhoto(pid);}).filter(Boolean);
     analyzeGroup(grp, groupPhotos, function(listing){
-      if(listing){grp.listing=listing;grp.analyzed=true;}
+      if(listing){grp.listing=listing;grp.analyzed=true;renderListing(grp);}
       done++;
-      document.getElementById('progFill').style.width=(done/total*100)+'%';
+      document.getElementById('progFill').style.width=(50 + done/total*50)+'%';
       document.getElementById('progLbl').textContent=done+' / '+total;
-      renderAll();
-      if(grp.analyzed) renderListing(grp);
       updateExport();
       next();
     });
   }
   next();
+}
+
+function resetAnalyzeBtn(){
+  analyzing=false;
+  document.getElementById('analyzeAllBtn').disabled=false;
+  document.getElementById('analyzeAllBtn').innerHTML='✨ Analyze All';
 }
 
 function compressImage(dataUrl, callback) {
