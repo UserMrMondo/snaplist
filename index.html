@@ -979,7 +979,7 @@ function publishGroup(grp,callback){
   if(l.brand&&l.brand!=='Unknown')body.product.aspects['Brand']=[l.brand];
   if(l.color)body.product.aspects['Color']=[l.color];
 
-  fetch('https://api.ebay.com/sell/inventory/v1/inventory_item/'+encodeURIComponent(sku),{
+  fetch('https://snaplist-proxy.maxsibley90.workers.dev?url=https://api.ebay.com/sell/inventory/v1/inventory_item/'+encodeURIComponent(sku),{
     method:'PUT',
     headers:{'Authorization':'Bearer '+ebayToken,'Content-Type':'application/json','Content-Language':'en-US'},
     body:JSON.stringify(body)
@@ -1007,7 +1007,7 @@ function createOffer(grp,sku,l,callback){
     pricingSummary:{price:{value:String(l.price||10),currency:'USD'}},
     quantityLimitPerBuyer:10
   };
-  fetch('https://api.ebay.com/sell/inventory/v1/offer',{
+  fetch('https://snaplist-proxy.maxsibley90.workers.dev?url=https://api.ebay.com/sell/inventory/v1/offer',{
     method:'POST',
     headers:{'Authorization':'Bearer '+ebayToken,'Content-Type':'application/json','Content-Language':'en-US'},
     body:JSON.stringify(body)
@@ -1021,7 +1021,7 @@ function createOffer(grp,sku,l,callback){
 }
 
 function publishOffer(offerId,callback){
-  fetch('https://api.ebay.com/sell/inventory/v1/offer/'+offerId+'/publish',{
+  fetch('https://snaplist-proxy.maxsibley90.workers.dev?url=https://api.ebay.com/sell/inventory/v1/offer/'+offerId+'/publish',{
     method:'POST',headers:{'Authorization':'Bearer '+ebayToken,'Content-Type':'application/json'}
   })
   .then(function(r){return r.json();})
